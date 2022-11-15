@@ -1,5 +1,5 @@
 # **ML-Inventory-Activity**
-![Version](https://img.shields.io/badge/Version-1.1.1-brightgreen.svg) ![Dashboard](https://img.shields.io/badge/Dashboard-TODO-red.svg) ![Documentation](https://img.shields.io/badge/Documentation-Ready-brightgreen.svg)
+![Version](https://img.shields.io/badge/Version-1.1.1-brightgreen.svg) ![Documentation](https://img.shields.io/badge/Documentation-Ready-brightgreen.svg)
 
 > Deploys a Jenkins Pipeline which automates the daily aggregation and transformation of data and insight relating to inventory of active listings on the cars.com platform via automic. Built in a python environment using Spark via the pySpark API, EC2 spot instances are leveraged to pull from various AWS data storage solutions.
 ---
