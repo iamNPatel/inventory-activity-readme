@@ -1,25 +1,25 @@
 # **ML-Inventory-Activity**
-<!-- ![Version](https://img.shields.io/badge/Version-1.1.1-brightgreen.svg) ![Dashboard](https://img.shields.io/badge/Dashboard-TODO-red.svg) ![Documentation](https://img.shields.io/badge/Documentation-Ready-brightgreen.svg) --> 
+![Version](https://img.shields.io/badge/Version-1.1.1-brightgreen.svg) ![Dashboard](https://img.shields.io/badge/Dashboard-TODO-red.svg) ![Documentation](https://img.shields.io/badge/Documentation-Ready-brightgreen.svg)
 
-> Deploys a Jenkins Pipeline which automates the daily aggregation and transformation of data and insight relating to inventory of active listings on the cars.com platform via automic. Built in a python enviroment using Spark via the pySpark API, S3 spot instances are leveraged to pull from various AWS data storage solutions.
+> Deploys a Jenkins Pipeline which automates the daily aggregation and transformation of data and insight relating to inventory of active listings on the cars.com platform via automic. Built in a python enviroment using Spark via the pySpark API, EC2 spot instances are leveraged to pull from various AWS data storage solutions.
 ---
 
 ## Table of contents
 1. config
     - There are several config files, for dev, prod, stage, and forge. 
-        - The forge file is used for spinning up a forge instance on S3.
+        - The forge file is used for spinning up an EC2 instance using forge.
         - The other config files are used for identifying the various filepaths in the data-lake from which the data is being pulled from.
 2. resources
-    - The resource files have two main functions, one is defining the Automic enviroment for the workflow and serving as config files for the python scripts by providing locations for various required tables. 
+    - The resource files have two main functions, one is defining the Automic enviroment for the workflow and serving as config files for the python scripts by providing locations for various required datasets. There are also json files which define the schema for the final IA df, and the ingestion method for writing to s3. 
 3. scripts
-    - The shell scripts found here are used for initating the workflow, creating s3 clusters and initating their enviroments and starting the python scripts. They also do error handling, basic logging functions, and hold the looping logic for completing backfill jobs.
+    - The shell scripts found here are used for initating the pipeline, creating EC2 clusters and initating their environments and starting the python scripts. They also do error handling, basic logging functions, and hold the looping logic for completing backfill jobs.
 4. src
-    - This source folder contains all of the python scripts used by this workflow. Shared definitions are stored within the functions.py file.
+    - This source folder contains all of the pySpark scripts used by this pipeline. Shared definitions are stored within the functions.py file.
         - inventory_activity_main holds the main function which executes the ETL process in a linear path.
-        - active_listing_tmp extracts current data from VEHICLE_TEMP and filters it against data from vehicle_history_temp to create a subset of unique active inventory records in a dataframe object.
+        - active_listing_tmp extracts current data from vehicle_temp and filters it against data from vehicle_history_temp to create a subset of unique active inventory records in a dataframe object.
         - listing_activity pulls weighted impressions and leads to build an accurate activity tracking metric per listing.
-        - active_listing_transform_tmp aggregates the listing into natural groups based on physical qualaties of the vehicles and by soft characteristics such as location (by zipcode).
-        - listing_activity_load is used to compile the final attributes of the vehicle/listing from various sources including 3rd party data. The data is also written to a landing db in s3 from here as well.
+        - active_listing_transform_tmp pulls vehicle data on active listings from various datasets in s3 and joins them to the IA df. 
+        - listing_activity_load is used to compile the final attributes of the vehicle/listing from various sources including competitor data. The data is written to a landing bucket in s3, from which it is moved into the core bucket. 
 5. miscellaneous
     - Jenkinsfile is a groovy script used to build the Pipeline and link it to nescessary dependencies. 
 
@@ -35,14 +35,14 @@ The python scripts are exceuted on a linear path, each having some contribution 
 3. listing_activity_tmp.py
     - With inputs of the spark session, config data, the date, and the df generated in the previous script, the main method here has the task of consolidating all leads and impressions relevant to all active listings. The leads & impressions are collected on rolling intrevals of 2, 3, 5, 7, and 30 days.
 4. active_listing_transform_tmp.py
-    - The in-progress IA and the config files are used to create range of temp dfs containing physical characteristics of the vehicles. These temp dfs are joined onto the AI df along a set of id keys.
+    - The main function here pulls directly from s3 {make, make_model, model_year, vehicle_trim, stock_type, bodystyle, zip_code, dma_zip, dealer_review_rollup, dealer_review, vehicle_definition} to make several temp dfs. The dealer_review df is filtered by a "purchased" flag and the dma_zip df is joined to the zip_code. These two new dfs along with the previously created temp dfs are all joined to return a veh_df which is returned back to the main script.
 5. inventory_activity_load.py
-    - This is the final part of the IA workflow. First a few temp tables are registered from s3, which are joined onto the IA df. Listing values from carguru, truecar, and autotrader are filtered by matches to listings on cars.com which are then joined to the IA df as well. To match with the registered schema on s3, the data types of some columns are casted accordingly. Finally the df is broken into several random partitions which are then written to s3.  
+    - This is the final part of the IA workflow. First a few temp tables are registered from s3 {vehicle_daily_temp, vehicle_review_rollup_temp, customer_temp, activity_customer_temp, dealer_sales_locations}, which are joined onto the IA df. Listing values from carguru, truecar, and autotrader are filtered by matches to listings on cars.com which are then joined to the IA df as well. To match with the registered schema on s3, the data types of some columns are casted accordingly. Finally the df is broken into several random partitions which are then written to s3 in a landing bucket, ready to be sent to the core bucket. 
 
 
 ---
 
-This workflow is initated in AutoMic as a part of a daily process or a backfill job. Automic passes the starting date (and the #of days for a backfill job) to the start.sh shell script which initates the creation of on-demand EC2 clusters. These clusters are 
+<!-- This workflow is initated in Automic as a part of a daily process or a backfill job. Automic passes the starting date (and the #of days for a backfill job) to the start.sh shell script which initates the creation of on-demand EC2 clusters. These clusters are 
 
 Once the environment is built, the python scripts are initated.
 Taken as parameteres from run_main.sh, the python scrips are initated with a starting context of date and a yaml file. The main function loads the yaml data as an object which is used as the configs. This object, as well as the spark instance and the date are passesd to active_listing_tmp.main. 
@@ -55,7 +55,7 @@ Listing_activity_tmp_df is then passed to active_listing_transform_tmp.main whic
 
 This df along with listing_activity_tmp_df, the date, and the configs file are passed to inventory_activity_load.main which registers them and a few tables from s3 as temp tables {vehicle_daily_temp, vehicle_review_rollup_temp, customer_temp, activity_customer_temp, dealer_sales_locations}. veh_reviews is used to create a df that contains reviews for each vehicle based on make and model which is passed into the final_join_df function with the current date. This creates the final inventory activity table that joins all features regarding the currently active listings. A new schema is then created using lists of pre-defined columns sorted by data-type. Data from carguru, autotrader and truecar are joined to the final df via the vin identifier of each vehicle. Daily attributes of each vehicle are then joined to the final df. The dataframe is then partitioned into 50 smaller files and they are written to s3a://cars-data-lake-landing-dev/ml_usr-dev@cars.com/inventory_activity/filedate={date}. 
 
-If this process is being run as a backfill job, the start.sh file will rerun the program for the following day, if this is run as the daily workflow or is the last day in a backfill job, the s3 clusters will be destroyed and a followup job will move the files from landing to core. 
+If this process is being run as a backfill job, the start.sh file will rerun the program for the following day, if this is run as the daily workflow or is the last day in a backfill job, the s3 clusters will be destroyed and a followup job will move the files from landing to core. -->
 
 ## Business Use
 
